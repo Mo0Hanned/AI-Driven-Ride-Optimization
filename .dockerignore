@@ -1,0 +1,11 @@
+data/
+Evaluation/
+notebook_train_data/
+
+*.pdf
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+.*lock*
