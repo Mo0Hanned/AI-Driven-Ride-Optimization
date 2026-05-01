@@ -35,7 +35,7 @@ For a deeper dive into the structure, see [ARCHITECTURE.md](docs/ARCHITECTURE.md
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/smart-fleet-intelligence.git
+   git clone https://github.com/Mo0Hanned/AI-Driven-Ride-Optimization.git
    cd smart-fleet-intelligence
    ```
 
