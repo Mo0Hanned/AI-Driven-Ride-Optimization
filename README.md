@@ -5,8 +5,12 @@
 ![LightGBM](https://img.shields.io/badge/LightGBM-4A4A4A?style=for-the-badge&logo=scikit-learn)
 ![Pandas](https://img.shields.io/badge/pandas-%23150458.svg?style=for-the-badge&logo=pandas&logoColor=white)
 ![Dask](https://img.shields.io/badge/Dask-1E1C1A?style=for-the-badge&logo=dask&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-%23FF9900.svg?style=for-the-badge&logo=amazon-aws&logoColor=white)
 ![CUDA](https://img.shields.io/badge/CUDA-76B900?style=for-the-badge&logo=nvidia&logoColor=white)
 
+🚀 **Live API Documentation:** [http://www.smart-fleet.me:8000/docs](http://www.smart-fleet.me:8000/docs)
+  
 The **Smart Fleet Intelligence API** is a machine-learning-powered backend designed for advanced fleet management, dynamic taxi dispatching, and urban mobility optimization in New York City.
 
 By leveraging highly accurate gradient boosting models (LightGBM) trained on the NYC Taxi Dataset, this platform provides real-time predictive insights to maximize driver revenue, minimize idle time, and eliminate geographical vehicle stock-outs.
@@ -20,6 +24,13 @@ By leveraging highly accurate gradient boosting models (LightGBM) trained on the
 - **Decision Engine (Profit Planner):** A complex strategic engine that analyzes all zones simultaneously to generate a multi-fleet repositioning plan, telling drivers exactly where to move to maximize overall network profit.
 - **Geospatial Integration:** All endpoints natively return GeoJSON `shp_file` coordinates for seamless frontend map rendering.
 
+## ☁️ Cloud Infrastructure & Deployment
+
+This project is fully containerized and deployed in a production-like environment:
+- **Containerization:** The entire application, dependencies, and ML artifacts are packaged into a single image hosted on **Docker Hub** (`mohanedm/ride-app`).
+- **Cloud Hosting:** Deployed on an **AWS EC2** instance running Ubuntu.
+- **Networking:** Accessible via a custom domain (`smart-fleet.me`) bound to an AWS Elastic IP for static routing, with configured AWS Security Groups handling port forwarding.
+
 ## 🏗️ Architecture
 
 The codebase strictly adheres to **Clean Architecture** principles to ensure maintainability, scalability, and robust error handling.
@@ -31,34 +42,45 @@ The codebase strictly adheres to **Clean Architecture** principles to ensure mai
 
 For a deeper dive into the structure, see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## 🛠️ Installation & Setup
+## ⚡ Quick Start (Docker Hub - Recommended)
+
+You don't need to build from source or install ML dependencies. You can run the entire ML inference engine using a single command:
+
+```bash
+docker run -d -p 8000:8000 --name fleet-api mohanedm/ride-app:latest
+```
+*The API will be instantly available at `http://localhost:8000/docs`.*
+
+## 🛠️ Local Development & Setup
+
+If you wish to modify the code or build the image locally:
 
 1. **Clone the repository**
    ```bash
    git clone https://github.com/Mo0Hanned/AI-Driven-Ride-Optimization.git
-   cd smart-fleet-intelligence
+   cd AI-Driven-Ride-Optimization
    ```
 
-2. **Create a virtual environment and install dependencies**
+2. **Run with Docker Compose (or Build locally)**
+   ```bash
+   docker build -t smart-fleet-api .
+   docker run -d -p 8000:8000 smart-fleet-api
+   ```
+
+3. **Manual Setup (Without Docker)**
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
    pip install -r requirements.txt
-   ```
-
-3. **Ensure Model Files are Present**
-   The application requires pre-trained `.pkl` and `.joblib` files inside the `model/` directory, and shapefiles inside `taxi_zones/`.
-
-4. **Run the API Server**
-   ```bash
    uvicorn main1:app --host 0.0.0.0 --port 8000 --reload
    ```
+   *Note: Ensure Model Files (`.pkl`, `.joblib`) are present inside the `model/` directory, and shapefiles inside `taxi_zones/`.*
 
 ## 📚 API Documentation
 
 Once the server is running, the interactive OpenAPI documentation is available at:
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
+- **Swagger UI**: `/docs`
+- **ReDoc**: `/redoc`
 
 For detailed request/response examples, see the [API Reference](docs/API_REFERENCE.md).
 
@@ -72,3 +94,4 @@ python test_endpoints.py
 ## ⚙️ Model Pipelining
 
 The system uses advanced **Model Pipelining**. Certain models (like Revenue and Stockout) intrinsically depend on the Demand model's output. The `api_services.py` layer automatically handles this by running the Demand model in the background, injecting the generated features into the dependent models, and returning the final output seamlessly. This prevents negative demand edge-cases and reduces frontend complexity.
+
