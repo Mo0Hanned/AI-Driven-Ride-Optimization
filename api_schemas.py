@@ -273,30 +273,30 @@ class Demand15MinRequest(BaseModel):
 
 class DecisionConstraints(BaseModel):
     """Rules and constraints guiding the decision engine optimizations."""
-    max_reposition_eta_min: float = Field(25.0, gt=0)
-    max_empty_km: float = Field(12.0, gt=0)
-    max_moves_total: Optional[int] = None
-    min_net_gain_per_driver: float = 10.0
-    calibrated_stockout_target: float = 0.55
-    calibrated_stockout_source_max: float = Field(0.65, ge=0.0, le=1.0)
+    max_reposition_eta_min: float = Field(12.0, gt=0)
+    max_empty_km: float = Field(4.5, gt=0)
+    max_moves_total: Optional[int] = Field(4, ge=0)
+    min_net_gain_per_driver: float = Field(4.0, ge=0)
+    calibrated_stockout_target: float = Field(0.05, ge=0.0, le=1.0)
+    calibrated_stockout_source_max: float = Field(0.12, ge=0.0, le=1.0)
     min_target_gap: int = Field(1, ge=0)
-    min_source_coverage_ratio: float = Field(0.75, ge=0.0, le=1.0)
+    min_source_coverage_ratio: float = Field(0.93, ge=0.0, le=1.0)
 
 class BusinessParams(BaseModel):
     """Financial and operational parameters used to calculate profit margins."""
-    profit_mode: str = "detailed_costs"
-    driver_cost_per_hour: float = 25.0
-    fuel_cost_per_km: float = 0.3
-    idle_cost_per_min: float = 0.60
-    reposition_cost_per_km: float = 1.20
-    commission_rate: float = 0.20
-    driver_acceptance_prob: float = Field(0.85, ge=0.0, le=1.0)
-    traffic_surge_multiplier: float = 1.0
-    weather_risk_multiplier: float = 1.0
-    sla_penalty_per_underserved_trip: float = 5.0
-    event_zone_priority_boost: float = 1.2
+    profit_mode: str = "marginal_profit"
+    driver_cost_per_hour: float = 28.0
+    fuel_cost_per_km: float = 0.25
+    idle_cost_per_min: float = 0.25
+    reposition_cost_per_km: float = 0.45
+    commission_rate: float = 0.25
+    driver_acceptance_prob: float = Field(0.70, ge=0.0, le=1.0)
+    traffic_surge_multiplier: float = 1.2
+    weather_risk_multiplier: float = 1.25
+    sla_penalty_per_underserved_trip: float = 4.0
+    event_zone_priority_boost: float = 1.4
     airport_zone_protection: bool = True
-    strategic_reserve_ratio: float = 0.1
+    strategic_reserve_ratio: float = 0.06    
 
 class ZonePairOverride(BaseModel):
     """Explicit overrides for specific zone-to-zone routing heuristics."""
