@@ -333,23 +333,28 @@ class DecisionEngineService:
             baseline_profit = pred_rev_p50 * served_ratio * req.business_params.commission_rate
             total_baseline_profit += baseline_profit
 
-            # C. Evaluate as Target/Source
+            # C. Resolve Optional[bool] fields: if None, use internal rules
+            allow_as_source_resolved = zone.allow_as_source if zone.allow_as_source is not None else (not zone.is_airport_zone)
+            allow_as_target_resolved = zone.allow_as_target if zone.allow_as_target is not None else True
+            
+            # Evaluate as Target/Source
+            # NOTE: Airport is protected from being a SOURCE (pulling drivers), not from being a TARGET
             is_source = (
-                zone.allow_as_source 
+                allow_as_source_resolved
                 and surplus > 0 
                 and pred_stockout <= req.constraints.calibrated_stockout_source_max
             )
             is_target = (
-                zone.allow_as_target 
-                and not zone.is_airport_zone 
+                allow_as_target_resolved 
                 and deficit >= req.constraints.min_target_gap
+                and pred_stockout >= req.constraints.calibrated_stockout_target
             )
 
             zone_evaluations.append({
                 "zone_id": zone.zone_id,
                 "current_drivers": zone.current_drivers,
-                "allow_as_source": zone.allow_as_source,
-                "allow_as_target": zone.allow_as_target,
+                "allow_as_source": allow_as_source_resolved,
+                "allow_as_target": allow_as_target_resolved,
                 "is_airport_zone": zone.is_airport_zone,
                 "demand_6h": pred_demand,
                 "cycle_time_min": round(cycle_time_min, 2),
@@ -381,11 +386,20 @@ class DecisionEngineService:
         total_expected_uplift = 0.0
 
         for src in sources:
+            # Calculate movable surplus considering min_source_coverage_ratio protection
+            protected_drivers = math.ceil(src["drivers_needed_6h"] * req.constraints.min_source_coverage_ratio)
+            movable_surplus = max(0, src["current_drivers"] - protected_drivers)
+            
             for tgt in targets:
+                # Check if we've hit max_moves_total limit
+                if req.constraints.max_moves_total is not None and total_moved_count >= req.constraints.max_moves_total:
+                    break
+                    
                 ov = override_map.get((src["zone_id"], tgt["zone_id"]))
                 if ov:
                     dist_km, eta_min, eta_source_label = ov.distance_km, ov.eta_min, "override"
                 else:
+                    # Fallback for ETA and distance (TODO: use ETA model or zone matrix or pair_overrides)
                     dist_km, eta_min, eta_source_label = 5.0, 15.0, "fallback" 
 
                 if dist_km > req.constraints.max_empty_km or eta_min > req.constraints.max_reposition_eta_min:
@@ -396,7 +410,18 @@ class DecisionEngineService:
                 net_gain_per_driver = rev_per_driver_tgt - move_cost_per_driver
 
                 if net_gain_per_driver >= req.constraints.min_net_gain_per_driver:
-                    drivers_to_move = min(src["surplus"], tgt["deficit"])
+                    # Calculate remaining moves allowed under max_moves_total constraint
+                    remaining_moves = (
+                        req.constraints.max_moves_total - total_moved_count
+                        if req.constraints.max_moves_total is not None
+                        else float("inf")
+                    )
+                    
+                    if remaining_moves <= 0:
+                        break
+                    
+                    # Use movable_surplus (respects min_source_coverage_ratio) instead of raw surplus
+                    drivers_to_move = min(movable_surplus, tgt["deficit"], int(remaining_moves))
                     
                     if drivers_to_move > 0:
                         effective_moved = drivers_to_move * req.business_params.driver_acceptance_prob
@@ -422,6 +447,7 @@ class DecisionEngineService:
                         })
 
                         src["surplus"] -= drivers_to_move
+                        movable_surplus -= drivers_to_move
                         tgt["deficit"] -= drivers_to_move
                         total_moved_count += drivers_to_move
                         total_move_cost += total_move_cost_for_batch
@@ -429,6 +455,10 @@ class DecisionEngineService:
 
                         if tgt["deficit"] == 0:
                             break
+            
+            # Stop outer loop if max_moves_total reached
+            if req.constraints.max_moves_total is not None and total_moved_count >= req.constraints.max_moves_total:
+                break
 
         target_deficit_after = sum(z["deficit"] for z in zone_evaluations)
         deficit_resolved = target_deficit_before - target_deficit_after
