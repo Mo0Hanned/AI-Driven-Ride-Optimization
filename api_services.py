@@ -1,242 +1,14 @@
 """
-Business Logic and Services for the Smart Fleet Intelligence API.
-This module extracts the complex operations, model invocations, and calculations
-away from the FastAPI controllers to maintain Clean Architecture.
+Decision Engine for Fleet Repositioning and Profit Planning.
+Handles strategic repositioning optimization for taxi fleets.
 """
 
-import numpy as np
-import pandas as pd
 import math
-from typing import List, Dict, Any
+from typing import Dict, Any
 from api_schemas import (
-    Demand6hRequest, RevenueRequest, StockOutRequest, ETARequest,
-    Demand15MinRequest, ProfitPlan6hRequest, DemandInput, RevenueInput, StockOutInput
+    ProfitPlan6hRequest, DemandInput, RevenueInput, StockOutInput
 )
 from ml_core import model_manager
-
-class PredictionService:
-    """Service handling all Machine Learning inference operations."""
-    
-    @staticmethod
-    def predict_demand_6h(req: Demand6hRequest) -> List[Dict[str, Any]]:
-        """Predicts taxi demand over a 6-hour window."""
-        if model_manager.demand_model is None:
-            raise ValueError("Demand 6h model is not loaded.")
-        
-        if not req.rows:
-            return []
-
-        df = DemandInput.list_to_df(req.rows)
-        preds = model_manager.demand_model.predict(df)
-        
-        results = []
-        for i, row in enumerate(req.rows):
-            final_prediction = int(np.ceil(np.maximum(preds[i], 0)))
-            
-            # Cache the prediction for dependent pipelines
-            cache_key = f"{row.PULocationID}_{row.pickup_hour}"
-            model_manager.demand_cache[cache_key] = final_prediction
-            
-            results.append({
-                "status": "success",
-                "PULocationID": row.PULocationID,
-                "Predicted_Demand_6h": final_prediction,
-                "shp_file": model_manager.get_zone_geojson(row.PULocationID)
-            })
-        return results
-
-    @staticmethod
-    def predict_revenue(req: RevenueRequest) -> List[Dict[str, Any]]:
-        """Predicts revenue percentiles (P50, P90) based on expected demand."""
-        if model_manager.rev_model_p50 is None or model_manager.rev_model_p90 is None or model_manager.demand_model is None:
-            raise ValueError("Revenue or Demand models are not loaded.")
-        
-        if not req.rows:
-            return []
-
-        # 1. First, automatically compute Demand for each row
-        computed_demands = []
-        for row in req.rows:
-            demand_dict = {k: getattr(row, k) for k in DemandInput.model_fields}
-            demand_features = DemandInput(**demand_dict)
-            
-            df_demand = DemandInput.list_to_df([demand_features])
-            pred = model_manager.demand_model.predict(df_demand)[0]
-            final_prediction = int(np.ceil(np.maximum(pred, 0))) # Ensure non-negative
-            computed_demands.append(final_prediction)
-                
-        # 2. Inject computed demand into the Revenue dataframe
-        df = RevenueInput.list_to_df(req.rows)
-        df['forecasted_demand_6h'] = computed_demands 
-        
-        # Explicitly enforce correct column order required by the model
-        cols_order = ['PULocationID', 'pickup_hour', 'day_of_week', 'is_weekend', 'forecasted_demand_6h', 
-                      'rev_lag_1_6h', 'rev_lag_1_week', 'rev_rolling_mean_7d', 'rev_rolling_mean_30d', 'avg_fare', 'tip_rate']
-        df = df[cols_order]
-        
-        # 3. Predict Revenue
-        preds_p50 = model_manager.rev_model_p50.predict(df)
-        preds_p90 = model_manager.rev_model_p90.predict(df)
-        
-        results = []
-        for i, row in enumerate(req.rows):
-            results.append({
-                "PULocationID": row.PULocationID,
-                "Predicted_Revenue_P50": round(float(max(0, preds_p50[i])), 2),
-                "Predicted_Revenue_P90": round(float(max(0, preds_p90[i])), 2),
-                "shp_file": model_manager.get_zone_geojson(row.PULocationID)
-            })
-        return results
-
-    @staticmethod
-    def predict_stockout(req: StockOutRequest) -> List[Dict[str, Any]]:
-        """Predicts the probability of a vehicle stockout in a given zone."""
-        if model_manager.stockout_model is None or model_manager.demand_model is None:
-            raise ValueError("Stockout or Demand models are not loaded.")
-        
-        if not req.rows:
-            return []
-
-        # 1. Compute Demand
-        computed_demands = []
-        for row in req.rows:
-            demand_features = DemandInput(
-                PULocationID=row.zone_id,
-                pickup_hour=row.hour,
-                day_of_week=row.day_of_week,
-                is_weekend=row.is_weekend,
-                temp_c=row.temp_c,
-                rain_mm=row.rain_mm,
-                is_rain=row.is_rain,
-                weather_code=row.weather_code,
-                is_holiday=row.is_holiday,
-                lag_1_6h=row.lag_1_6h,
-                lag_2_6h=row.lag_2_6h,
-                lag_4_6h=row.lag_4_6h,
-                rolling_mean_24h=row.rolling_mean_24h
-            )
-            
-            df_demand = DemandInput.list_to_df([demand_features])
-            pred = model_manager.demand_model.predict(df_demand)[0]
-            final_prediction = int(np.ceil(np.maximum(pred, 0)))
-            computed_demands.append(final_prediction)
-                
-        # 2. Inject into Stockout dataframe
-        df = StockOutInput.list_to_df(req.rows)
-        df['forecasted_demand_6h'] = computed_demands
-        
-        # Explicitly enforce column order
-        cols_order = ['zone_id', 'hour', 'day_of_week', 'is_weekend', 'pickup_count', 'dropoff_count', 'net_flow', 
-                      'activity_ratio', 'lag_1_pickup', 'lag_1_dropoff', 'lag_1_net_flow', 'forecasted_demand_6h', 
-                      'temp_c', 'rain_mm', 'is_rain', 'weather_code', 'is_holiday']
-        df = df[cols_order]
-        
-        # 3. Predict Stockout Probability
-        probs = model_manager.stockout_model.predict(df)
-        
-        results = []
-        for i, row in enumerate(req.rows):
-            prob = float(probs[i])
-            will_stockout = int(prob >= 0.5)  
-            results.append({
-                "zone_id": row.zone_id,
-                "Probability_of_StockOut": round(prob, 4),
-                "Will_StockOut": will_stockout,
-                "Risk_Level": "CRITICAL" if prob >= 0.88 else "WARNING" if prob >= 0.80 else "OK ✅",
-                "shp_file": model_manager.get_zone_geojson(row.zone_id)
-            })
-        return results
-
-    @staticmethod
-    def predict_eta(req: ETARequest) -> List[Dict[str, Any]]:
-        """Predicts the estimated time of arrival (ETA) for a given trip."""
-        if model_manager.eta_artifact is None:
-            raise ValueError("ETA model artifact is not loaded.")
-            
-        if not req.rows:
-            return []
-            
-        input_dicts = []
-        for row in req.rows:
-            dt = pd.to_datetime(row.pickup_datetime)
-            input_dicts.append({
-                "PULocationID": row.PULocationID, "DOLocationID": row.DOLocationID,
-                "distance_km_proxy": row.trip_distance, "temp_c": row.temp_c,
-                "rain_mm": row.rain_mm, "weather_code": row.weather_code,
-                "pickup_hour": dt.hour, "pickup_dow": dt.weekday(), "pickup_month": dt.month,
-                "pickup_dayofyear": dt.dayofyear, "pickup_minute": dt.minute,
-                "is_weekend": 1 if dt.weekday() >= 5 else 0,
-                "is_rush_hour": 1 if (7 <= dt.hour <= 9 or 16 <= dt.hour <= 19) else 0,
-                "pickup_15min_bucket": (dt.hour * 60 + dt.minute) // 15
-            })
-            
-        input_df = pd.DataFrame(input_dicts)
-
-        for col in model_manager.eta_artifact.features:
-            if col not in input_df.columns:
-                input_df[col] = 0 
-        
-        X = input_df[model_manager.eta_artifact.features].copy()
-        if hasattr(model_manager.eta_artifact, 'categorical_features') and model_manager.eta_artifact.categorical_features:
-            for col in model_manager.eta_artifact.categorical_features:
-                if col in X.columns:
-                    X[col] = X[col].astype('category')
-
-        preds_p50 = model_manager.eta_artifact.model_p50.predict(X)
-        preds_p90 = model_manager.eta_artifact.model_p90.predict(X)
-
-        results = []
-        for i, row in enumerate(req.rows):
-            p50 = float(preds_p50[i])
-            p90 = float(preds_p90[i])
-            results.append({
-                "status": "success",
-                "predictions": {
-                    "median_eta_seconds": round(p50, 2), "upper_bound_eta_seconds": round(p90, 2),
-                    "median_eta_minutes": round(p50 / 60, 2)
-                },
-                "info": { "pickup": row.pickup_datetime, "distance": row.trip_distance },
-                "shp_file": model_manager.get_zone_geojson(row.PULocationID),
-                "pickup_shp_file": model_manager.get_zone_geojson(row.PULocationID),
-                "dropoff_shp_file": model_manager.get_zone_geojson(row.DOLocationID)
-            })
-        return results
-
-    @staticmethod
-    def predict_demand_15min(req: Demand15MinRequest) -> List[Dict[str, Any]]:
-        """Predicts ultra-short-term demand (15 minute windows)."""
-        if model_manager.demand_15m_booster is None or model_manager.demand_15m_bundle is None:
-            raise ValueError("Demand 15m model is not loaded.")
-            
-        rows_dicts = [row.model_dump() for row in req.rows]
-        df = pd.DataFrame(rows_dicts)
-
-        missing = [c for c in model_manager.demand_15m_features if c not in df.columns]
-        if missing:
-            raise ValueError(f"Missing features: {missing}")
-
-        df["PULocationID"] = df["PULocationID"].astype(model_manager.demand_15m_zone_dtype)
-        df["weather_code"] = df["weather_code"].astype(model_manager.demand_15m_weather_dtype)
-        
-        X = df[model_manager.demand_15m_features]
-
-        pred = model_manager.demand_15m_booster.predict(X, validate_features=True)
-        pred = np.clip(pred, 0, None)  
-
-        results = []
-        for i, row in enumerate(rows_dicts):
-            prediction_val = float(pred[i])
-            if req.round_to_int:
-                prediction_val = int(np.rint(prediction_val))
-            
-            results.append({
-                "status": "success",
-                "PULocationID": row["PULocationID"],
-                "Predicted_Demand_15min": prediction_val,
-                "shp_file": model_manager.get_zone_geojson(row["PULocationID"])
-            })
-
-        return results
 
 
 class DecisionEngineService:
@@ -245,14 +17,34 @@ class DecisionEngineService:
     @staticmethod
     def evaluate_profit_plan(req: ProfitPlan6hRequest) -> Dict[str, Any]:
         """Evaluates multiple zones and creates a strategic repositioning plan to maximize profit."""
-        if model_manager.demand_model is None or model_manager.rev_model_p50 is None or model_manager.stockout_model is None:
-            raise ValueError("Missing ML models for Decision Engine.")
+        if model_manager.demand_model is None or model_manager.rev_model_p50 is None or model_manager.rev_model_p90 is None or model_manager.stockout_model is None:
+            raise ValueError("Missing ML models for Decision Engine: demand_model, rev_model_p50, rev_model_p90, and stockout_model are required.")
 
         zone_evaluations = []
         total_baseline_profit = 0.0
         target_deficit_before = 0
 
+        # Resolve allow_as_source and allow_as_target with defaults and business rules
+        def resolve_allow_as_source(zone, business_params):
+            """Resolve allow_as_source: explicit value > business rule > default True"""
+            if zone.allow_as_source is not None:
+                return zone.allow_as_source
+            # Airport protection: airports cannot be sources (pull-out is protected)
+            if zone.is_airport_zone and business_params.airport_zone_protection:
+                return False
+            return True
+        
+        def resolve_allow_as_target(zone, business_params):
+            """Resolve allow_as_target: explicit value > default True"""
+            if zone.allow_as_target is not None:
+                return zone.allow_as_target
+            return True
+
         for zone in req.zones:
+            # Resolve source/target flags early
+            allow_as_source_resolved = resolve_allow_as_source(zone, req.business_params)
+            allow_as_target_resolved = resolve_allow_as_target(zone, req.business_params)
+
             # A. Run Models in sequence
             demand_features = DemandInput(
                 PULocationID=zone.zone_id,
@@ -333,12 +125,9 @@ class DecisionEngineService:
             baseline_profit = pred_rev_p50 * served_ratio * req.business_params.commission_rate
             total_baseline_profit += baseline_profit
 
-            # C. Resolve Optional[bool] fields: if None, use internal rules
-            allow_as_source_resolved = zone.allow_as_source if zone.allow_as_source is not None else (not zone.is_airport_zone)
-            allow_as_target_resolved = zone.allow_as_target if zone.allow_as_target is not None else True
-            
             # Evaluate as Target/Source
             # NOTE: Airport is protected from being a SOURCE (pulling drivers), not from being a TARGET
+            movable_drivers = max(0, zone.current_drivers - math.ceil(drivers_needed * req.constraints.min_source_coverage_ratio))
             is_source = (
                 allow_as_source_resolved
                 and surplus > 0 
@@ -349,6 +138,30 @@ class DecisionEngineService:
                 and deficit >= req.constraints.min_target_gap
                 and pred_stockout >= req.constraints.calibrated_stockout_target
             )
+            
+            # Determine source and target reason codes
+            if surplus > 0 and allow_as_source_resolved:
+                if pred_stockout > req.constraints.calibrated_stockout_source_max:
+                    source_reason_code = "STOCKOUT_TOO_HIGH"
+                else:
+                    source_reason_code = "HAS_SURPLUS"
+            elif not allow_as_source_resolved:
+                if zone.is_airport_zone and req.business_params.airport_zone_protection:
+                    source_reason_code = "AIRPORT_PROTECTED"
+                else:
+                    source_reason_code = "DISALLOWED"
+            else:
+                source_reason_code = "NO_SURPLUS"
+            
+            if deficit >= req.constraints.min_target_gap and allow_as_target_resolved:
+                if pred_stockout < req.constraints.calibrated_stockout_target:
+                    target_reason_code = "SURPLUS_TOO_HIGH"
+                else:
+                    target_reason_code = "HAS_DEFICIT"
+            elif not allow_as_target_resolved:
+                target_reason_code = "DISALLOWED"
+            else:
+                target_reason_code = "DEFICIT_TOO_SMALL"
 
             zone_evaluations.append({
                 "zone_id": zone.zone_id,
@@ -363,6 +176,7 @@ class DecisionEngineService:
                 "driver_gap": driver_gap,
                 "deficit": deficit,
                 "surplus": surplus,
+                "movable_drivers_under_coverage_policy": movable_drivers,
                 "revenue_p50": round(pred_rev_p50, 2),
                 "revenue_p90": round(pred_rev_p90, 2),
                 "uncertainty": round(pred_rev_p90 - pred_rev_p50, 2),
@@ -371,96 +185,192 @@ class DecisionEngineService:
                 "baseline_profit": round(baseline_profit, 2),
                 "source_candidate": is_source,
                 "target_candidate": is_target,
-                "reason": f"needs {deficit} drivers" if is_target else f"has {surplus} surplus drivers, P50 revenue={round(pred_rev_p50, 2)}"
+                "source_reason_code": source_reason_code,
+                "source_reason_text": f"surplus={surplus}, movable={movable_drivers}, stockout={round(pred_stockout, 4)}" if surplus > 0 else f"deficit={deficit}, allow_as_source={allow_as_source_resolved}",
+                "target_reason_code": target_reason_code,
+                "target_reason_text": f"deficit={deficit}, stockout={round(pred_stockout, 4)}" if deficit >= req.constraints.min_target_gap else f"deficit={deficit} < min_gap({req.constraints.min_target_gap})",
+                **({"geojson": model_manager.get_zone_geojson(zone.zone_id)} if req.include_geojson else {})
             })
 
         # D. Build Move Candidates (Repositioning)
         reposition_plan = []
+        rejected_moves = []
         override_map = {(ov.from_zone, ov.to_zone): ov for ov in req.pair_overrides}
         
         sources = [z for z in zone_evaluations if z["source_candidate"]]
         targets = [z for z in zone_evaluations if z["target_candidate"]]
 
+        # Debug summary with counters
+        debug_summary = {
+            "candidate_pairs_count": len(sources) * len(targets),
+            "source_candidate_count": len(sources),
+            "target_candidate_count": len(targets),
+            "rejected_pairs_count": 0,  # Will be updated after pair evaluation
+            "executed_moves_count": 0,  # Will be updated after move processing
+            "notes": []
+        }
+        if not sources:
+            debug_summary["notes"].append("no source candidates available")
+        if not targets:
+            debug_summary["notes"].append("no target candidates available")
+
         total_moved_count = 0
         total_move_cost = 0.0
         total_expected_uplift = 0.0
+        
+        # Track movable quantities separately to avoid mutating zone_evaluations
+        zone_movable_surplus = {src["zone_id"]: max(0, src["current_drivers"] - math.ceil(src["drivers_needed_6h"] * req.constraints.min_source_coverage_ratio)) for src in sources}
+        zone_remaining_deficit = {tgt["zone_id"]: tgt["deficit"] for tgt in targets}
 
+        # Compute max_moves_total if not provided
+        effective_max_moves_total = req.constraints.max_moves_total
+        if effective_max_moves_total is None:
+            total_movable_surplus = sum(zone_movable_surplus.values())
+            effective_max_moves_total = max(1, int(total_movable_surplus * 0.1)) if total_movable_surplus > 0 else 0
+
+        # Pre-compute all valid candidate pairs with their metrics for ranking
+        candidate_pairs = []
         for src in sources:
-            # Calculate movable surplus considering min_source_coverage_ratio protection
-            protected_drivers = math.ceil(src["drivers_needed_6h"] * req.constraints.min_source_coverage_ratio)
-            movable_surplus = max(0, src["current_drivers"] - protected_drivers)
-            
+            src_zone_id = src["zone_id"]
             for tgt in targets:
-                # Check if we've hit max_moves_total limit
-                if req.constraints.max_moves_total is not None and total_moved_count >= req.constraints.max_moves_total:
-                    break
-                    
-                ov = override_map.get((src["zone_id"], tgt["zone_id"]))
-                if ov:
-                    dist_km, eta_min, eta_source_label = ov.distance_km, ov.eta_min, "override"
-                else:
-                    # Fallback for ETA and distance (TODO: use ETA model or zone matrix or pair_overrides)
-                    dist_km, eta_min, eta_source_label = 5.0, 15.0, "fallback" 
-
-                if dist_km > req.constraints.max_empty_km or eta_min > req.constraints.max_reposition_eta_min:
+                tgt_zone_id = tgt["zone_id"]
+                
+                ov = override_map.get((src_zone_id, tgt_zone_id))
+                if not ov:
+                    rejected_moves.append({
+                        "from_zone": src_zone_id,
+                        "to_zone": tgt_zone_id,
+                        "reason": "no override provided; requires pair_override with distance_km and eta_min"
+                    })
+                    debug_summary["rejected_pairs_count"] += 1
                     continue
-
-                move_cost_per_driver = (eta_min * req.business_params.idle_cost_per_min) + (dist_km * req.business_params.reposition_cost_per_km)
+                
+                dist_km, eta_min = ov.distance_km, ov.eta_min
+                if dist_km > req.constraints.max_empty_km or eta_min > req.constraints.max_reposition_eta_min:
+                    rejected_moves.append({
+                        "from_zone": src_zone_id,
+                        "to_zone": tgt_zone_id,
+                        "reason": f"distance_km ({dist_km}) exceeds max_empty_km ({req.constraints.max_empty_km})" if dist_km > req.constraints.max_empty_km else f"eta_min ({eta_min}) exceeds max_reposition_eta_min ({req.constraints.max_reposition_eta_min})"
+                    })
+                    debug_summary["rejected_pairs_count"] += 1
+                    continue
+                
+                # Calculate move cost: idle + reposition + driver wages + fuel
+                # Apply traffic surge multiplier to reposition cost
+                idle_cost = eta_min * req.business_params.idle_cost_per_min
+                reposition_cost = dist_km * req.business_params.reposition_cost_per_km * req.business_params.traffic_surge_multiplier
+                driver_wage_cost = (eta_min / 60.0) * req.business_params.driver_cost_per_hour  # convert minutes to hours
+                fuel_cost = dist_km * req.business_params.fuel_cost_per_km
+                
+                move_cost_per_driver = idle_cost + reposition_cost + driver_wage_cost + fuel_cost
+                
+                # Calculate revenue per driver at target with weather risk adjustment
+                # Apply weather risk multiplier as a discount on revenue (increases conservatism)
                 rev_per_driver_tgt = (tgt["revenue_p50"] * req.business_params.commission_rate) / max(1, tgt["drivers_needed_6h"])
+                rev_per_driver_tgt = rev_per_driver_tgt / req.business_params.weather_risk_multiplier  # Higher multiplier = lower expected revenue
+                
+                # Apply event zone priority boost to target zone revenue if it's an event zone
+                if tgt.get("is_event_zone", False):
+                    rev_per_driver_tgt = rev_per_driver_tgt * req.business_params.event_zone_priority_boost
+                
                 net_gain_per_driver = rev_per_driver_tgt - move_cost_per_driver
 
                 if net_gain_per_driver >= req.constraints.min_net_gain_per_driver:
-                    # Calculate remaining moves allowed under max_moves_total constraint
-                    remaining_moves = (
-                        req.constraints.max_moves_total - total_moved_count
-                        if req.constraints.max_moves_total is not None
-                        else float("inf")
-                    )
-                    
-                    if remaining_moves <= 0:
-                        break
-                    
-                    # Use movable_surplus (respects min_source_coverage_ratio) instead of raw surplus
-                    drivers_to_move = min(movable_surplus, tgt["deficit"], int(remaining_moves))
-                    
-                    if drivers_to_move > 0:
-                        effective_moved = drivers_to_move * req.business_params.driver_acceptance_prob
-                        expected_net_gain = net_gain_per_driver * effective_moved
-                        total_move_cost_for_batch = move_cost_per_driver * effective_moved
-
-                        reposition_plan.append({
-                            "from_zone": src["zone_id"],
-                            "to_zone": tgt["zone_id"],
-                            "drivers_to_move": drivers_to_move,
-                            "effective_drivers_moved": round(effective_moved, 2),
-                            "driver_acceptance_prob": req.business_params.driver_acceptance_prob,
-                            "eta_min": eta_min,
-                            "distance_km": dist_km,
-                            "eta_source": eta_source_label,
-                            "net_gain_per_driver": round(net_gain_per_driver, 1),
-                            "expected_net_gain": round(expected_net_gain, 2),
-                            "move_cost": round(total_move_cost_for_batch, 2),
-                            "risk_score": 19.6, 
-                            "confidence_score": 73.8, 
-                            "business_reason": f"Move {drivers_to_move} drivers from surplus zone {src['zone_id']} to deficit zone {tgt['zone_id']}; expected gain per driver = {round(net_gain_per_driver, 1)}.",
-                            "rule": "ranked by net_gain_per_driver under ETA/distance/supply/deficit constraints"
-                        })
-
-                        src["surplus"] -= drivers_to_move
-                        movable_surplus -= drivers_to_move
-                        tgt["deficit"] -= drivers_to_move
-                        total_moved_count += drivers_to_move
-                        total_move_cost += total_move_cost_for_batch
-                        total_expected_uplift += expected_net_gain
-
-                        if tgt["deficit"] == 0:
-                            break
+                    candidate_pairs.append({
+                        "src": src,
+                        "tgt": tgt,
+                        "src_zone_id": src_zone_id,
+                        "tgt_zone_id": tgt_zone_id,
+                        "dist_km": dist_km,
+                        "eta_min": eta_min,
+                        "move_cost_per_driver": move_cost_per_driver,
+                        "rev_per_driver_tgt": rev_per_driver_tgt,
+                        "net_gain_per_driver": net_gain_per_driver
+                    })
+                else:
+                    rejected_moves.append({
+                        "from_zone": src_zone_id,
+                        "to_zone": tgt_zone_id,
+                        "reason": f"net_gain_per_driver ({round(net_gain_per_driver, 2)}) below min_net_gain_per_driver ({req.constraints.min_net_gain_per_driver})"
+                    })
+                    debug_summary["rejected_pairs_count"] += 1
+        
+        # RANK candidates by net_gain_per_driver (descending), with priority for current_zone
+        def ranking_key(pair):
+            # Primary: net_gain_per_driver (higher is better)
+            # Tiebreaker: prioritize targets in current_zone, deprioritize sources from current_zone
+            src_is_current = (pair["src_zone_id"] == req.current_zone)
+            tgt_is_current = (pair["tgt_zone_id"] == req.current_zone)
             
-            # Stop outer loop if max_moves_total reached
-            if req.constraints.max_moves_total is not None and total_moved_count >= req.constraints.max_moves_total:
+            # Current zone bonus: stronger multiplier to increase impact
+            # Reduce penalty for pulling from current zone: -15% (was -10%)
+            # Increase reward for adding to current zone: +20% (was +5%)
+            current_zone_bonus = (
+                pair["net_gain_per_driver"] * (-0.15 if src_is_current else 0) 
+                + pair["net_gain_per_driver"] * (0.20 if tgt_is_current else 0)
+            )
+            return (pair["net_gain_per_driver"] + current_zone_bonus, -pair["dist_km"])
+        
+        candidate_pairs.sort(key=ranking_key, reverse=True)
+        
+        # Process ranked pairs
+        for pair in candidate_pairs:
+            if effective_max_moves_total is not None and total_moved_count >= effective_max_moves_total:
                 break
+            
+            src_zone_id = pair["src_zone_id"]
+            tgt_zone_id = pair["tgt_zone_id"]
+            
+            # Calculate remaining moves allowed
+            remaining_moves = (
+                effective_max_moves_total - total_moved_count
+                if effective_max_moves_total is not None
+                else float("inf")
+            )
+            
+            if remaining_moves <= 0:
+                break
+            
+            # Use local tracking (do NOT mutate zone_evaluations)
+            current_movable = zone_movable_surplus.get(src_zone_id, 0)
+            current_deficit = zone_remaining_deficit.get(tgt_zone_id, 0)
+            
+            if current_movable <= 0 or current_deficit <= 0:
+                continue
+            
+            drivers_to_move = min(int(current_movable), int(current_deficit), int(remaining_moves))
+            
+            if drivers_to_move > 0:
+                effective_moved = drivers_to_move * req.business_params.driver_acceptance_prob
+                expected_net_gain = pair["net_gain_per_driver"] * effective_moved
+                total_move_cost_for_batch = pair["move_cost_per_driver"] * effective_moved
 
-        target_deficit_after = sum(z["deficit"] for z in zone_evaluations)
+                reposition_plan.append({
+                    "from_zone": src_zone_id,
+                    "to_zone": tgt_zone_id,
+                    "drivers_to_move": drivers_to_move,
+                    "effective_drivers_moved": round(effective_moved, 2),
+                    "driver_acceptance_prob": req.business_params.driver_acceptance_prob,
+                    "eta_min": pair["eta_min"],
+                    "distance_km": pair["dist_km"],
+                    "eta_source": "override",
+                    "net_gain_per_driver": round(pair["net_gain_per_driver"], 1),
+                    "expected_net_gain": round(expected_net_gain, 2),
+                    "move_cost": round(total_move_cost_for_batch, 2),
+                    "business_reason": f"Move {drivers_to_move} drivers from surplus zone {src_zone_id} to deficit zone {tgt_zone_id}; expected gain per driver = {round(pair['net_gain_per_driver'], 1)}.",
+                    "rule": "ranked by net_gain_per_driver under ETA/distance/supply/deficit constraints",
+                    **({"from_zone_geojson": model_manager.get_zone_geojson(src_zone_id), "to_zone_geojson": model_manager.get_zone_geojson(tgt_zone_id)} if req.include_geojson else {})
+                })
+                debug_summary["executed_moves_count"] += 1
+
+                # Update local tracking (do NOT mutate zone_evaluations)
+                zone_movable_surplus[src_zone_id] -= drivers_to_move
+                zone_remaining_deficit[tgt_zone_id] -= drivers_to_move
+                total_moved_count += drivers_to_move
+                total_move_cost += total_move_cost_for_batch
+                total_expected_uplift += expected_net_gain
+
+        target_deficit_after = sum(zone_remaining_deficit.values())
         deficit_resolved = target_deficit_before - target_deficit_after
         total_projected_profit = total_baseline_profit + total_expected_uplift
 
@@ -482,6 +392,7 @@ class DecisionEngineService:
                 "target_deficit_after": target_deficit_after
             },
             "reposition_plan": reposition_plan,
-            "rejected_moves": [],
-            "zone_evaluations": zone_evaluations
+            "rejected_moves": rejected_moves,
+            "zone_evaluations": zone_evaluations,
+            "debug_summary": debug_summary
         }
