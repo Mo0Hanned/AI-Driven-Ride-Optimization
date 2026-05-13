@@ -56,6 +56,33 @@ class DemandInput(BaseMLInput):
     lag_4_6h: float
     rolling_mean_24h: float
 
+class Demand6hRequest(BaseModel):
+    """Request wrapper for batch processing of 6h Demand predictions."""
+    rows: List[DemandInput]
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "rows": [
+                    {
+                        "PULocationID": 237,
+                        "pickup_hour": 18,
+                        "day_of_week": 3,
+                        "is_weekend": 0,
+                        "temp_c": 18.5,
+                        "rain_mm": 0.0,
+                        "is_rain": 0,
+                        "weather_code": 0.0,
+                        "is_holiday": 0,
+                        "lag_1_6h": 120.5,
+                        "lag_2_6h": 115.0,
+                        "lag_4_6h": 110.0,
+                        "rolling_mean_24h": 95.5
+                    }
+                ]
+            }
+        }
+    )
 
 class RevenueInput(DemandInput):
     """Input schema for Revenue prediction."""
@@ -67,6 +94,39 @@ class RevenueInput(DemandInput):
     avg_fare: float
     tip_rate: float
 
+class RevenueRequest(BaseModel):
+    """Request wrapper for batch processing of Revenue predictions."""
+    rows: List[RevenueInput]
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "rows": [
+                    {
+                        "PULocationID": 161,
+                        "pickup_hour": 8,
+                        "day_of_week": 1,
+                        "is_weekend": 0,
+                        "temp_c": 18.5,
+                        "rain_mm": 0.0,
+                        "is_rain": 0,
+                        "weather_code": 0.0,
+                        "is_holiday": 0,
+                        "lag_1_6h": 120.5,
+                        "lag_2_6h": 115.0,
+                        "lag_4_6h": 110.0,
+                        "rolling_mean_24h": 95.5,
+                        "rev_lag_1_6h": 4500.50,
+                        "rev_lag_1_week": 4200.75,
+                        "rev_rolling_mean_7d": 4100.0,
+                        "rev_rolling_mean_30d": 3950.0,
+                        "avg_fare": 18.50,
+                        "tip_rate": 0.15
+                    }
+                ]
+            }
+        }
+    )
 
 class StockOutInput(BaseMLInput):
     """Input schema for Stockout Risk prediction."""
@@ -92,38 +152,156 @@ class StockOutInput(BaseMLInput):
     lag_4_6h: float
     rolling_mean_24h: float
 
+class StockOutRequest(BaseModel):
+    """Request wrapper for batch processing of Stockout predictions."""
+    rows: List[StockOutInput]
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "rows": [
+                    {
+                        "zone_id": 132,
+                        "hour": 22,
+                        "day_of_week": 4,
+                        "is_weekend": 0,
+                        "pickup_count": 85.0,
+                        "dropoff_count": 120.0,
+                        "net_flow": -35.0,
+                        "activity_ratio": 1.2,
+                        "lag_1_pickup": 90.0,
+                        "lag_1_dropoff": 110.0,
+                        "lag_1_net_flow": -20.0,
+                        "temp_c": 15.0,
+                        "rain_mm": 0.0,
+                        "is_rain": 0,
+                        "weather_code": 0.0,
+                        "is_holiday": 0,
+                        "lag_1_6h": 80.5,
+                        "lag_2_6h": 75.0,
+                        "lag_4_6h": 70.0,
+                        "rolling_mean_24h": 65.5
+                    }
+                ]
+            }
+        }
+    )
+
+class ETAInput(BaseModel):
+    """Input schema for Travel Time (ETA) prediction."""
+    pickup_datetime: str = Field(..., description="Format: YYYY-MM-DD HH:MM:SS")
+    PULocationID: int = Field(..., ge=1, le=265)
+    DOLocationID: int = Field(..., ge=1, le=265)
+    trip_distance: float = Field(..., ge=0.0)
+    temp_c: float = 20.0
+    rain_mm: float = Field(0.0, ge=0.0)
+    weather_code: float = 0.0
+
+class ETARequest(BaseModel):
+    """Request wrapper for batch processing of ETA predictions."""
+    rows: List[ETAInput]
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "rows": [
+                    {
+                        "pickup_datetime": "2024-05-15 14:30:00",
+                        "PULocationID": 237,
+                        "DOLocationID": 236,
+                        "trip_distance": 1.5,
+                        "temp_c": 22.0,
+                        "rain_mm": 0.0,
+                        "weather_code": 0.0
+                    }
+                ]
+            }
+        }
+    )
+
+class Demand15MinRowInput(BaseModel):
+    """Input schema for ultra-short-term (15m) demand prediction."""
+    PULocationID: int
+    pickup_cnt: float
+    lag_1: float
+    lag_4: float
+    lag_96: float
+    roll_mean_1h: float
+    roll_mean_3h: float
+    hour: int
+    minute: int
+    day_of_week: int
+    is_weekend: int
+    month: int
+    temp_c: float
+    rain_mm: float
+    is_rain: int
+    weather_code: float
+
+class Demand15MinRequest(BaseModel):
+    """Request wrapper for batch processing of 15m Demand predictions."""
+    rows: List[Demand15MinRowInput]
+    round_to_int: Optional[bool] = True 
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "rows": [
+                    {
+                        "PULocationID": 237,
+                        "pickup_cnt": 15.0,
+                        "lag_1": 12.0,
+                        "lag_4": 10.0,
+                        "lag_96": 14.0,
+                        "roll_mean_1h": 11.5,
+                        "roll_mean_3h": 10.2,
+                        "hour": 14,
+                        "minute": 30,
+                        "day_of_week": 2,
+                        "is_weekend": 0,
+                        "month": 5,
+                        "temp_c": 22.0,
+                        "rain_mm": 0.0,
+                        "is_rain": 0,
+                        "weather_code": 0.0
+                    }
+                ],
+                "round_to_int": True
+            }
+        }
+    )
 
 class DecisionConstraints(BaseModel):
     """Rules and constraints guiding the decision engine optimizations."""
-    max_reposition_eta_min: float = Field(25.0, gt=0)
-    max_empty_km: float = Field(12.0, gt=0)
+    max_reposition_eta_min: float = Field(12.0, gt=0)
+    max_empty_km: float = Field(4.5, gt=0)
     max_moves_total: Optional[int] = Field(
-        None,
+        4, 
         ge=0,
         description="If None, calculated as 0 when no drivers exist, otherwise max(1, int(total_drivers * 0.1))"
     )
-    min_net_gain_per_driver: float = Field(10.0, ge=0)
+    min_net_gain_per_driver: float = Field(4.0, ge=0)
     
-    calibrated_stockout_target: float = Field(0.55, ge=0.0, le=1.0)
-    calibrated_stockout_source_max: float = Field(0.65, ge=0.0, le=1.0)
+    calibrated_stockout_target: float = Field(0.05, ge=0.0, le=1.0)
+    calibrated_stockout_source_max: float = Field(0.12, ge=0.0, le=1.0)
     min_target_gap: int = Field(1, ge=0)
-    min_source_coverage_ratio: float = Field(0.75, ge=0.0, le=1.0)
+    min_source_coverage_ratio: float = Field(0.93, ge=0.0, le=1.0)
 
 class BusinessParams(BaseModel):
     """Financial and operational parameters used to calculate profit margins."""
-    profit_mode: str = "detailed_costs"
-    driver_cost_per_hour: float = 25.0
-    fuel_cost_per_km: float = 0.3
-    idle_cost_per_min: float = 0.6
-    reposition_cost_per_km: float = 1.2
-    commission_rate: float = 0.2
-    driver_acceptance_prob: float = Field(0.85, ge=0.0, le=1.0)
-    traffic_surge_multiplier: float = 1.0
-    weather_risk_multiplier: float = 1.0
-    sla_penalty_per_underserved_trip: float = 5.0
-    event_zone_priority_boost: float = 1.2
+    profit_mode: str = "marginal_profit"
+    driver_cost_per_hour: float = 28.0
+    fuel_cost_per_km: float = 0.25
+    idle_cost_per_min: float = 0.25
+    reposition_cost_per_km: float = 0.45
+    commission_rate: float = 0.25
+    driver_acceptance_prob: float = Field(0.70, ge=0.0, le=1.0)
+    traffic_surge_multiplier: float = 1.2
+    weather_risk_multiplier: float = 1.25
+    sla_penalty_per_underserved_trip: float = 4.0
+    event_zone_priority_boost: float = 1.4
     airport_zone_protection: bool = True
-    strategic_reserve_ratio: float = 0.1    
+    strategic_reserve_ratio: float = 0.065    
 
 class ZonePairOverride(BaseModel):
     """Explicit overrides for specific zone-to-zone routing heuristics."""
@@ -136,8 +314,8 @@ class ZoneDecisionInput(BaseModel):
     """State input representing a single taxi zone for the decision engine."""
     zone_id: int = Field(..., ge=1, le=265)
     current_drivers: int = Field(..., ge=0)
-    allow_as_source: Optional[bool] = None
-    allow_as_target: Optional[bool] = None
+    allow_as_source: Optional[bool] = True
+    allow_as_target: Optional[bool] = True
     is_event_zone: bool = False
     is_airport_zone: bool = False
     
@@ -187,9 +365,13 @@ class ProfitPlan6hRequest(BaseModel):
     
     @model_validator(mode='after')
     def compute_dynamic_constraints(self):
-        """Auto-compute max_moves_total based on total movable surplus drivers.
-        If total_movable == 0, max_moves_total becomes 0. Otherwise, 10% of total movable surplus (min 1).
-        Note: This is a placeholder; actual calculation happens in evaluate_profit_plan after movable surplus is computed.
+        """Auto-compute max_moves_total based on total available drivers.
+        If total_drivers == 0, max_moves_total becomes 0. Otherwise, 10% of total drivers (min 1).
         """
-        # Placeholder: actual computation in service
+        if self.constraints.max_moves_total is None and self.zones:
+            total_drivers = sum(zone.current_drivers for zone in self.zones)
+            if total_drivers == 0:
+                self.constraints.max_moves_total = 0
+            else:
+                self.constraints.max_moves_total = max(1, int(total_drivers * 0.1))
         return self
