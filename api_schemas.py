@@ -301,7 +301,7 @@ class BusinessParams(BaseModel):
     sla_penalty_per_underserved_trip: float = 4.0
     event_zone_priority_boost: float = 1.4
     airport_zone_protection: bool = True
-    strategic_reserve_ratio: float = 0.06    
+    strategic_reserve_ratio: float = 0.065    
 
 class ZonePairOverride(BaseModel):
     """Explicit overrides for specific zone-to-zone routing heuristics."""
