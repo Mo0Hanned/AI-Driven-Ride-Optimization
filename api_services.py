@@ -319,9 +319,14 @@ class DecisionEngineService:
             df_stock = df_stock[cols_order_stock]
             pred_stockout = float(model_manager.stockout_model.predict(df_stock)[0])
 
-            # B. Calculate Operational Metrics
+            # B. Calculate Operational Metrics (FIXED THE 28 TRIPS GLITCH)
             cycle_time_min = 12.67 
-            trips_per_driver_6h = math.floor(360 / cycle_time_min)
+            # Calculate maximum raw capacity, then downscale by driver acceptance / utilization rate
+            max_possible_trips = 360 / cycle_time_min
+            trips_per_driver_6h = math.floor(max_possible_trips * req.business_params.driver_acceptance_prob)
+            if trips_per_driver_6h < 1:
+                trips_per_driver_6h = 1
+
             drivers_needed = math.ceil(pred_demand / trips_per_driver_6h)
             driver_gap = drivers_needed - zone.current_drivers
             
@@ -338,7 +343,6 @@ class DecisionEngineService:
             allow_as_target_resolved = zone.allow_as_target if zone.allow_as_target is not None else True
             
             # Evaluate as Target/Source
-            # NOTE: Airport is protected from being a SOURCE (pulling drivers), not from being a TARGET
             is_source = (
                 allow_as_source_resolved
                 and surplus > 0 
@@ -349,6 +353,11 @@ class DecisionEngineService:
                 and deficit >= req.constraints.min_target_gap
                 and pred_stockout >= req.constraints.calibrated_stockout_target
             )
+
+            # FIXED UNCERTAINTY INVERSION (P90 should always be larger, forcing positive absolute uncertainty)
+            calculated_uncertainty = pred_rev_p90 - pred_rev_p50
+            if calculated_uncertainty < 0:
+                calculated_uncertainty = abs(calculated_uncertainty)
 
             zone_evaluations.append({
                 "zone_id": zone.zone_id,
@@ -364,8 +373,8 @@ class DecisionEngineService:
                 "deficit": deficit,
                 "surplus": surplus,
                 "revenue_p50": round(pred_rev_p50, 2),
-                "revenue_p90": round(pred_rev_p90, 2),
-                "uncertainty": round(pred_rev_p90 - pred_rev_p50, 2),
+                "revenue_p90": round(max(pred_rev_p90, pred_rev_p50), 2),
+                "uncertainty": round(calculated_uncertainty, 2),
                 "stockout_prob": round(pred_stockout, 4),
                 "served_ratio_baseline": round(served_ratio, 4),
                 "baseline_profit": round(baseline_profit, 2),
@@ -386,12 +395,10 @@ class DecisionEngineService:
         total_expected_uplift = 0.0
 
         for src in sources:
-            # Calculate movable surplus considering min_source_coverage_ratio protection
             protected_drivers = math.ceil(src["drivers_needed_6h"] * req.constraints.min_source_coverage_ratio)
             movable_surplus = max(0, src["current_drivers"] - protected_drivers)
             
             for tgt in targets:
-                # Check if we've hit max_moves_total limit
                 if req.constraints.max_moves_total is not None and total_moved_count >= req.constraints.max_moves_total:
                     break
                     
@@ -399,7 +406,6 @@ class DecisionEngineService:
                 if ov:
                     dist_km, eta_min, eta_source_label = ov.distance_km, ov.eta_min, "override"
                 else:
-                    # Fallback for ETA and distance (TODO: use ETA model or zone matrix or pair_overrides)
                     dist_km, eta_min, eta_source_label = 5.0, 15.0, "fallback" 
 
                 if dist_km > req.constraints.max_empty_km or eta_min > req.constraints.max_reposition_eta_min:
@@ -410,7 +416,6 @@ class DecisionEngineService:
                 net_gain_per_driver = rev_per_driver_tgt - move_cost_per_driver
 
                 if net_gain_per_driver >= req.constraints.min_net_gain_per_driver:
-                    # Calculate remaining moves allowed under max_moves_total constraint
                     remaining_moves = (
                         req.constraints.max_moves_total - total_moved_count
                         if req.constraints.max_moves_total is not None
@@ -420,7 +425,6 @@ class DecisionEngineService:
                     if remaining_moves <= 0:
                         break
                     
-                    # Use movable_surplus (respects min_source_coverage_ratio) instead of raw surplus
                     drivers_to_move = min(movable_surplus, tgt["deficit"], int(remaining_moves))
                     
                     if drivers_to_move > 0:
@@ -456,7 +460,6 @@ class DecisionEngineService:
                         if tgt["deficit"] == 0:
                             break
             
-            # Stop outer loop if max_moves_total reached
             if req.constraints.max_moves_total is not None and total_moved_count >= req.constraints.max_moves_total:
                 break
 
