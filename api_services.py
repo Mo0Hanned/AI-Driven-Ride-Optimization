@@ -343,12 +343,12 @@ class DecisionEngineService:
             allow_as_target_resolved = zone.allow_as_target if zone.allow_as_target is not None else True
             
             # Evaluate as Target/Source
-            is_source = (
+            is_source = bool(
                 allow_as_source_resolved
                 and surplus > 0 
                 and pred_stockout <= req.constraints.calibrated_stockout_source_max
             )
-            is_target = (
+            is_target = bool(
                 allow_as_target_resolved 
                 and deficit >= req.constraints.min_target_gap
                 and pred_stockout >= req.constraints.calibrated_stockout_target
