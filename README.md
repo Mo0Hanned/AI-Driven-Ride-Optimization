@@ -7,6 +7,7 @@
 ![Dask](https://img.shields.io/badge/Dask-1E1C1A?style=for-the-badge&logo=dask&logoColor=white)
 ![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
 ![AWS](https://img.shields.io/badge/AWS-%23FF9900.svg?style=for-the-badge&logo=amazon-aws&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/github%20actions-%232671E5.svg?style=for-the-badge&logo=githubactions&logoColor=white)
 ![CUDA](https://img.shields.io/badge/CUDA-76B900?style=for-the-badge&logo=nvidia&logoColor=white)
 
 🚀 **Live API Documentation:** [http://www.smart-fleet.me:8000/docs](http://www.smart-fleet.me:8000/docs)
@@ -24,12 +25,14 @@ By leveraging highly accurate gradient boosting models (LightGBM) trained on the
 - **Decision Engine (Profit Planner):** A complex strategic engine that analyzes all zones simultaneously to generate a multi-fleet repositioning plan, telling drivers exactly where to move to maximize overall network profit.
 - **Geospatial Integration:** All endpoints natively return GeoJSON `shp_file` coordinates for seamless frontend map rendering.
 
-## ☁️ Cloud Infrastructure & Deployment
+## ☁️ DevOps, Cloud Infrastructure & CI/CD
 
-This project is fully containerized and deployed in a production-like environment:
-- **Containerization:** The entire application, dependencies, and ML artifacts are packaged into a single image hosted on **Docker Hub** (`mohanedm/ride-app`).
-- **Cloud Hosting:** Deployed on an **AWS EC2** instance running Ubuntu.
-- **Networking:** Accessible via a custom domain (`smart-fleet.me`) bound to an AWS Elastic IP for static routing, with configured AWS Security Groups handling port forwarding.
+This project bridges the gap between Data Science and MLOps, fully containerized and deployed in a production-ready environment:
+
+- **CI/CD Pipeline (GitHub Actions):** Features a fully automated workflow. Every push to the `main` branch triggers a build process that creates a new Docker image, pushes it to **Docker Hub**, and seamlessly deploys the update to the AWS EC2 instances via SSH without manual intervention.
+- **High Availability & Load Balancing:** Traffic is routed through an **AWS Application Load Balancer (ALB)** to distribute incoming API requests efficiently, ensuring high availability and system reliability.
+- **Containerization:** The entire application, dependencies (including PySpark and LightGBM), and ML artifacts are packaged into a single lightweight image (`mohanedm/ride-app`).
+- **Cloud Hosting & Networking:** Hosted on **AWS EC2** (Ubuntu), utilizing an **AWS Elastic IP** for static routing, secured by custom AWS Security Groups, and accessible via a custom domain (`smart-fleet.me`).
 
 ## 🏗️ Architecture
 
@@ -57,7 +60,7 @@ If you wish to modify the code or build the image locally:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Mo0Hanned/AI-Driven-Ride-Optimization.git
+   git clone [https://github.com/Mo0Hanned/AI-Driven-Ride-Optimization.git](https://github.com/Mo0Hanned/AI-Driven-Ride-Optimization.git)
    cd AI-Driven-Ride-Optimization
    ```
 
@@ -94,4 +97,3 @@ python test_endpoints.py
 ## ⚙️ Model Pipelining
 
 The system uses advanced **Model Pipelining**. Certain models (like Revenue and Stockout) intrinsically depend on the Demand model's output. The `api_services.py` layer automatically handles this by running the Demand model in the background, injecting the generated features into the dependent models, and returning the final output seamlessly. This prevents negative demand edge-cases and reduces frontend complexity.
-
