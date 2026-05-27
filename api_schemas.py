@@ -65,7 +65,7 @@ class Demand6hRequest(BaseModel):
             "example": {
                 "rows": [
                     {
-                        "PULocationID": 237,
+                        "PULocationID": 236,
                         "pickup_hour": 18,
                         "day_of_week": 3,
                         "is_weekend": 0,
