@@ -72,7 +72,7 @@ class Demand6hRequest(BaseModel):
                         "temp_c": 18.5,
                         "rain_mm": 0.0,
                         "is_rain": 0,
-                        "weather_code": 0.0,
+                        "weather_code": 0.00,
                         "is_holiday": 0,
                         "lag_1_6h": 120.5,
                         "lag_2_6h": 115.0,
