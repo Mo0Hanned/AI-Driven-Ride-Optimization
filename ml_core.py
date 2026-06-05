@@ -126,13 +126,24 @@ class MLModelManager:
             print(f"⚠️ Warning: Could not load shapefile. Error: {e}")
 
     def get_zone_geojson(self, zone_id: int) -> dict | None:
-        """Retrieves the GeoJSON geometry for a given taxi zone ID."""
+        """Retrieves the zone properties without the heavy geometry coordinates."""
         if self.gdf is None:
             return None
         zone = self.gdf[self.gdf['LocationID'] == zone_id]
         if zone.empty:
             return None
-        return json.loads(zone.to_json())
-
+        
+        properties = zone.drop(columns=[self.gdf.geometry.name]).iloc[0].to_dict()
+        
+        return {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "id": str(properties.get("LocationID", zone_id)),
+                    "type": "Feature",
+                    "properties": properties
+                }
+            ]
+        }
 # Export a single global instance
 model_manager = MLModelManager()
