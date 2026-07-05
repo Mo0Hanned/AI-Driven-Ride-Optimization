@@ -10,7 +10,7 @@
 ![GitHub Actions](https://img.shields.io/badge/github%20actions-%232671E5.svg?style=for-the-badge&logo=githubactions&logoColor=white)
 ![CUDA](https://img.shields.io/badge/CUDA-76B900?style=for-the-badge&logo=nvidia&logoColor=white)
 
-🚀 **Live API Documentation:** [http://www.smart-fleet.me:8000/docs](http://www.smart-fleet.me:8000/docs)
+🚀 **Live API Documentation:** https://ai-driven-ride-optimization.onrender.com/docs
   
 The **Smart Fleet Intelligence API** is a machine-learning-powered backend designed for advanced fleet management, dynamic taxi dispatching, and urban mobility optimization in New York City.
 
